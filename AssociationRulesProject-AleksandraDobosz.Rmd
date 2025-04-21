@@ -1,0 +1,164 @@
+---
+title: 'Unsupervised Learning Project: Association Rules'
+author: "Aleksandra Dobosz"
+date: "2025-01-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/Users/aleksandra/Desktop/Unsupervised learning")
+```
+
+# Association Rules - Census Income Dataset
+
+## Dataset overview
+
+The Adult Dataset from the UCI Machine Learning Repository. It was extracted from the 1994 U.S. Census database and is also known as the "Census Income Dataset."
+The dataset contains both categorical and numerical variables:  
+1. Age (numerical) – Age of the individual.  
+2. Workclass (categorical) – Type of employer (e.g., private, self-employed, government).  
+3. Fnlwgt (numerical) – Final weight (adjusted for population sampling).  
+4. Education (categorical) – Highest level of education attained.  
+5. Education-num (numerical) – Education level encoded as a numeric variable.  
+6. Marital-status (categorical) – Marital status (e.g., married, divorced, never married).  
+7. Occupation (categorical) – Job category (e.g., tech support, sales, clerical).  
+8. Relationship (categorical) – Relationship to household head (e.g., husband, wife, unmarried).  
+9. Race (categorical) – Race of the individual.  
+10. Sex (categorical) – Gender (Male/Female).  
+11. Capital-gain (numerical) – Income from capital gains.  
+12. Capital-loss (numerical) – Income lost due to capital losses.  
+13. Hours-per-week (numerical) – Weekly working hours.  
+14. Native-country (categorical) – Country of origin.  
+15. Income (categorical) – Either “<=50K” or “>50K” (annual income in $).  
+
+
+## Goal of this paper
+
+  The primary objective of this paper is to apply association rules in order to find hidden relationships between demographic, occupational, and financial attributes. Association rules help identify patterns such as: Which education levels are strongly associated with high income? What work classes frequently appear with specific occupations? Are certain marital statuses more likely to be linked with a higher number of weekly work hours? I will pay special attention to find patterns that strongly indicate high-income and low income individuals. This will be achieved through: 
+
+- **Apriori Algorithm**, which is a foundational method for discovering frequent items and generating association rules. It is characterized with its significant ability to identify this relationships in large datasets.[^1]
+
+## Preprocessing the data
+
+Firstly, I am preprocessing the data - changing column names, removing NA's, converting categorical variables into factors.
+  
+```{r}
+col_names <- c('Age', 'WorkClass', 'fnlwgt', 'Education', 'EducationNum', 'MaritalStatus', 'Occupation', 
+               'Relationship', 'Race', 'Gender', 'CapitalGain', 'CapitalLoss', 'HoursPerWeek', 'NativeCountry', 'Income')
+
+data <- read.csv("adult.csv", na.strings = "?")
+head(data, 10)
+colnames(data) <- col_names
+data <- na.omit(data)
+
+#WorkClass, Education, MaritalStatus, Occupation, Relationship, Race, Gender, NativeCountry, Income are characters
+
+characters <- c('WorkClass', 'MaritalStatus', 'Occupation', 'Relationship', 'Race', 
+                         'Gender', 'NativeCountry', 'Income')
+
+data[characters] <- lapply(data[characters], as.factor)
+
+data$Education <- cut(data$EducationNum, breaks = c(0, 5, 10, 15, 16), labels = c("Low", "Medium", "High", "Very High"), right = TRUE)
+
+data$Age <- cut(data$Age, breaks = c(17, 30, 40, 50, 65, 90), labels = c("17-30", "31-40", "41-50", "51-65", "66-90"), right = TRUE)
+
+data$CapitalGain <- cut(data$CapitalGain, breaks = c(-Inf, 1000, 5000, 20000, 50000, Inf), labels = c("Very Low", "Low", "Medium", "High", "Very High"))
+
+data$CapitalLoss <- cut(data$CapitalLoss, breaks = 5, labels = c("Very Low", "Low", "Medium", "High", "Very High"), include.lowest = TRUE)
+
+data$HoursPerWeek <- cut(data$HoursPerWeek, breaks = c(0, 20, 40, 60, 80, 100), labels = c("Very Low", "Low", "Medium", "High", "Very High"), right = TRUE)
+
+data <- subset(data, select = -c(EducationNum, fnlwgt))
+
+str(data)
+```
+
+Now, I am transforming my data into format which is suitable for Apriori algorithm.
+
+```{r, message=FALSE}
+library(arules)
+transactions_income <- as(data, "transactions")
+```
+
+
+```{r, message=FALSE}
+summary(transactions_income)
+inspect(transactions_income[1:10])
+itemFrequencyPlot(transactions_income, support = 0.1, col="coral4")
+```
+
+## Apriori Algorithm
+
+I am now applying Apriori Algorithm.I am setting support level 10% - this means that an item must appear in at least 10% of the dataset. It will help me filter out rare, less meaningful patterns. Confidence is set at level of 80% - whenever the antecedent (left-hand side) occur, there is at least 80% chances that the consequent (right-hand side) will occur. After applying the Apriori algorithm, I am sorting by lift, confidence and count. Sorting by lift find strong dependencies between attributes beyond random occurence. It can be used in relation to high income. Confidence sorting displays how reliable the rule is in predicting an outcome. Finally, support sorting is used to find frquent patterns that appear in many transactions. 
+```{r, warning=FALSE}
+rules <- apriori(transactions_income, parameter = list(support = 0.1, confidence = 0.8), maxlen = 3)
+summary(rules)
+inspect(sort(rules, by = "lift")[1:10])
+inspect(sort(rules, by = "confidence")[1:10])
+inspect(sort(rules, by = "count")[1:10])
+```
+
+## What drives low and high income?
+
+Now, my Apriori implementation is generating association rules where the right-hand side is fixed to "Income=<=50K", meaning you're finding patterns that strongly indicate low-income individuals. I am sorting by "lift", because I want meanignful, strong assosiations. I am setting the support level at 0.01 to catch rare but more meaningful patterns, and confidence at 0.5 to reduce redundant rules. 
+
+```{r}
+#What drives the low income 
+rules.less50K<-apriori(data=transactions_income, parameter=list(supp=0.01,conf = 0.5), 
+appearance=list(default="lhs", rhs="Income=<=50K"), control=list(verbose=F)) 
+rules.less50K.bylift<-sort(rules.less50K, by="lift", decreasing=TRUE)
+inspect(head(rules.less50K.bylift))
+```
+
+Analyzing the rules I can say that there are some variables that seem to be highly associated with earning less than or equal $50K in this dataset. Occupation (such as "Other-service" and "Handlers-cleaners"), hours worked ("Very Low"), relationship status ("Own-child", "Never-married"), capital gains ("Very Low") and age (17-30 years). In this case, all rules have 100% confidence, meaning that when the conditions on the LHS hold, the RHS (Income <= 50K) will always hold. This suggests that these combinations are strong predictors of income being less than or equal to 50K. The lift value for all rules is the same (1.329511), indicating that these rules are 32.95% more likely to occur than by chance. 
+
+Below, I am generating association rules where the right-hand side is fixed to "Income=>50K", meaning finding patterns that strongly indicate high-income individuals.
+
+
+```{r}
+#What drives high income
+rules.more50K<-apriori(data=transactions_income, parameter=list(supp=0.01,conf = 0.5), 
+appearance=list(default="lhs", rhs="Income=>50K"), control=list(verbose=F)) 
+rules.more50K.bylift<-sort(rules.more50K, by="lift", decreasing=TRUE)
+inspect(head(rules.more50K.bylift))
+```
+
+These rules are explaining associations between various factors and the likelihood of earning greater than $50K.
+
+The strong inidicators of high income revealed from the rules above are:
+
+**Occupation**: "Exec-managerial" jobs are highly associated with earning more than $50K.  
+**Race**: Being "White" is seen frequently in these high-income rules.  
+**Capital Gain**: Individuals with "Medium" capital gain are often associated with higher incomes.  
+**Education**: Having "High" education (such as a high school diploma, college, or advanced degrees) is an important factor for earning more than $50K.  
+**Marital Status**: Being "Married-civ-spouse" also correlates strongly with earning more than $50K.  
+**Native Country**: Being from the United States also increases the likelihood of earning more than $50K.  
+
+The lift values for these rules are consistently high (around 3.86), meaning that these rules are significantly more likely than random chance to occur in the dataset. This suggests that the combinations of these attributes (e.g., occupation, education, capital gain, marital status) are very strong predictors of income being above $50K.
+
+```{r plot_rules, fig.width=10, fig.height=8}
+library(arulesViz)
+
+
+itemFrequencyPlot(transactions_income, topN=10, type="absolute", main="Item Frequency - absolute", col="coral") 
+itemFrequencyPlot(transactions_income, topN=10, type="relative", main="Item Frequency - relative", col="coral4")
+
+plot(rules, method = "grouped")
+```
+
+First plot above shows the top 10 most frequent items in my dataset. The second plot displays the proportion of occureness of each item relative to all of them. the third one, visualizes the association rules generated using Apriori algorithm. Shows relationship between left-hand side and right-hand side of the rules. Now I will display an interactive network graph of rules.
+
+```{r, warning=FALSE}
+# income <=50K
+plot(rules.less50K, method="graph", control = list(max = 10))
+
+# income >50K
+plot(rules.more50K, method="graph", control = list(max = 10))
+```
+
+## Conclusions 
+
+By mining association rules, I identified key factors that strongly influence income levels - distinguishing between individuals earning above or below $50K per year. This analysis indicates that low-income individuals are commonly associated with low education levels, service-sector occupations, young age, and low capital gains, whereas high-income individuals tend to have managerial or executive roles, high education levels, significant capital gains, and are often married. The strong lift values of these rules confirm that these relationships are far from random and can provide meaningful insights.
+
+
+[^1]: https://www.geeksforgeeks.org/apriori-algorithm/
